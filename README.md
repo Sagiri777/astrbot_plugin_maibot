@@ -1,14 +1,196 @@
-# astrbot-plugin-helloworld
+# Mai for AstrBot
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+Mai for AstrBot 不是一份单纯的“拟人化提示词”，而是把
+[MaiBot](https://github.com/Mai-with-u/MaiBot) 的核心交互思想适配到 AstrBot：
+先观察聊天、判断是否应该行动，再生成自然回复，并从真实交流中逐渐积累表达方式、
+圈内语言、互动成败和对当前用户的有限了解。
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+本插件面向 AstrBot API 独立实现，没有复制 MaiBot 源码、数据库或内置角色。
 
-# Supports
+## 当前能力
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+### Planner → Replyer
+
+群聊中未被直接唤醒时，Planner 可以阅读同一聊天最近的消息，只输出结构化的
+`reply` 或 `ignore` 决策。决定回复后，回复意图与建议语气会作为临时上下文交给
+AstrBot 原有回复模型；最终可见文本仍由当前人格、工具和会话生成。
+
+这让自主回复从“随机概率触发”变为“根据聊天时机判断”，同时保留冷却、判断间隔、
+置信度阈值和群聊白名单。
+
+### 行为结果学习
+
+开启后，每次 Planner 触发的自主发言都会在实际发送成功后建立反馈窗口。插件观察随后
+几条真实用户消息，再让评估模型判断本次互动是成功、部分有效、失败还是证据不足。
+
+有效结果会被泛化为“情境—做法—结果—经验”，按聊天隔离保存。评估必须引用发言后
+真实存在的消息来源编号，不能只凭机器人自己的回复给自己打分。相似场景下，Planner
+会召回最多 3 条历史经验；连续失败且低分的经验会被自动停用。
+
+这部分只保存泛化后的行为经验，不持久化完整反馈聊天和机器人原回复。
+
+### 跨聊天 Focus
+
+Focus 为自主发言 Planner 提供一个全局关注槽：
+
+- 普通消息只能延续当前关注的群聊，不能立即被其他群抢走；
+- 当前群在配置时间内没有新消息后，其他群可以取得关注；
+- 明确唤醒机器人可以强制切换关注群；
+- Focus 白名单可以限制参与竞争的聊天范围。
+
+Focus 不会阻止 AstrBot 对直接 @、命令或正常私聊的响应，只控制插件的自主发言。
+
+### 中期聊天回想
+
+中期回想复用社会学习批次，将有后续价值的共同经历、公开约定、项目进展或持续话题
+压缩为：
+
+- 简短标题和可独立理解的摘要；
+- 1 到 6 个召回线索；
+- 重要度和所属聊天范围。
+
+记录必须引用本批次真实消息来源。插件只持久化压缩结果，不保存原始聊天正文；寒暄、
+临时情绪和没有形成结果的碎片会被要求跳过。
+
+Planner 和 Replyer 只在当前或近期消息命中召回线索时使用相关回想。出现“上次”
+“之前”“还记得”等明确回忆表达但没有精确命中时，可以召回最近的重要记录。回想
+不会跨聊天流共享，也不会把私聊内容带入群聊。
+
+### 社会化学习
+
+插件可以按聊天隔离收集真实用户消息，达到批次大小后在后台提取：
+
+- 情境化表达习惯：什么情况下可以怎么说，以及适用触发词。
+- 圈内黑话：特殊缩写、梗或群内短语及其语境含义。
+- 可选人物事实：当前说话者明确自述的稳定、低敏感度偏好。
+
+所有学习结果必须引用本批次存在的消息来源编号。人物事实学习、私聊观察和群聊人物
+事实注入默认关闭。
+
+### 语境召回
+
+正常 LLM 回复前，插件会按当前消息选择：
+
+- 与触发词匹配的已学表达习惯；
+- 当前或近期聊天中实际出现的已学黑话；
+- 与当前说话者对应的低敏感度事实；
+- AstrBot 群聊上下文未启用时插件观察到的近期群聊记录；
+- Planner 为本轮回复准备的内容与语气指引。
+
+这些动态内容使用 AstrBot 临时内容块，不写入会话历史。稳定人格和表达规则保留在
+系统提示词中，方便模型服务端缓存。
+
+### 自然表达层
+
+- 保留 AstrBot 当前人格，不覆盖身份和工具能力。
+- 区分群聊与私聊的互动习惯。
+- 减少客服套话、机械总结和无必要 Markdown。
+- 根据问题复杂度自然改变回复长度。
+- 允许少量偏好、幽默和情绪，但不通过编造经历来假装真人。
+- 支持管理员手工维护“情境 → 表达方式”规则和备用风格。
+
+## 启用顺序
+
+插件默认只启用自然表达层。Planner 和所有自动学习能力默认关闭，避免在未确认成本、
+隐私和群聊范围前产生额外模型调用。
+
+推荐按下面顺序启用：
+
+1. 配置 AstrBot 的稳定人格并观察基础表达效果。
+2. 设置 `learner_provider_id`，启用表达学习和黑话学习。
+3. 使用 `/mailearn` 在当前聊天手动执行一次学习，检查结果数量。
+4. 为 Planner 设置便宜且 JSON 遵循能力好的模型。
+5. 设置自主发言白名单，再开启群聊自主发言。
+6. 确认 AstrBot 核心 `provider_ltm_settings.active_reply.enable` 已关闭。
+7. 开启行为反馈学习，先观察 `/maiknowledge` 中的经验是否符合预期。
+8. 多群运行时再启用 Focus，并设置 Focus 白名单和保持时间。
+9. 开启中期聊天回想，并通过 `/mailearn` 和 `/maiknowledge` 检查摘要质量。
+10. 最后根据实际需要决定是否启用人物事实和私聊学习。
+
+如果 AstrBot 核心主动回复与插件 Planner 同时开启，插件会暂停自己的自主回复并记录
+警告，避免重复发送。
+
+## 命令
+
+```text
+/maihumanizer
+```
+
+显示当前聊天的 Planner、Focus 和反馈观察状态，以及表达、人物、行为与聊天回想等
+记录数量。
+
+```text
+/mailearn
+```
+
+管理员命令。立即使用当前聊天缓冲区运行一次学习；至少需要 4 条可学习消息。
+
+```text
+/maiknowledge
+```
+
+管理员命令。预览当前聊天学到的表达、黑话、行为经验、聊天回想和当前用户事实，
+每类最多显示 5 条。
+
+```text
+/maiforget scope
+/maiforget user
+```
+
+管理员命令。前者清除当前聊天的表达、黑话、行为经验、聊天回想和临时观察缓冲区，
+后者清除当前说话者的人物事实。学习任务运行期间会拒绝清除，避免后台任务把数据
+立即写回。
+
+```text
+/maifocus
+/maifocus release
+```
+
+管理员命令。查看当前 Focus 占用情况，或手动释放关注槽。
+
+## 成本与隐私
+
+- Planner 每达到一次判断间隔会产生一次额外模型调用。
+- 自动学习每累计一个批次产生一次额外模型调用。
+- 中期回想复用自动学习批次，不会为同一批消息再单独调用一次模型。
+- 行为反馈在一次自主发言收集到足够后续消息后产生一次额外模型调用。
+- 群聊白名单、判断间隔、冷却和批次大小是主要成本控制项。
+- 私聊默认不观察、不进入学习缓冲区。
+- 人物事实只允许稳定、低敏感度的明确自述；敏感字段在学习提示中明确禁止。
+- 群聊人物事实注入默认关闭，避免跨场景泄露。
+- 学习结果保存在 AstrBot 插件隔离 KV 存储中。
+- 聊天回想只保存压缩后的标题、摘要和召回线索，不保存来源消息正文。
+- 管理员可以随时使用 `/maiknowledge` 审阅，并用 `/maiforget` 删除当前范围的数据。
+
+启用人物学习前，应根据实际部署地区和使用场景完成必要的隐私告知、同意与数据保留
+策略。
+
+## 与完整 MaiBot 的差距
+
+当前版本已经形成“观察 → 决策 → 回复 → 学习 → 召回”的核心闭环，但还不包含：
+
+- MaiBot Focus 中由模型主动读取其他聊天和执行 `switch_chat` 的工具能力；
+- 行为经验的场景聚类、共享组和复杂维护任务；
+- 向量化表达、行为和回想检索；
+- 跨聊天长期记忆图谱、记忆纠错和完整人物心理画像；
+- 语义表情包理解、选择和发送；
+- MaiBot 的完整插件运行时和 WebUI 管理页面。
+
+这些能力适合在后续版本逐项适配，不应该直接把 MaiBot 的内部架构整体嵌入 AstrBot。
+
+## 验证
+
+在 AstrBot 仓库根目录运行：
+
+```bash
+uv run pytest data/plugins/astrbot_plugin_maihumanizer/tests
+uv run ruff check data/plugins/astrbot_plugin_maihumanizer
+uv run ruff format --check data/plugins/astrbot_plugin_maihumanizer
+```
+
+## 致谢与许可
+
+- 参考项目：Mai-with-u/MaiBot，GPL-3.0。
+- 运行框架：AstrBot，AGPL-3.0-or-later。
+
+本插件随所在 AstrBot 仓库按 AGPL-3.0-or-later 分发。

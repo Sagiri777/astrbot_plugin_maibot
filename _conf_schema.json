@@ -1,0 +1,291 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "启用 Mai for AstrBot",
+    "hint": "关闭后插件不会观察聊天、学习或修改 LLM 请求。",
+    "default": true
+  },
+  "apply_to_private": {
+    "type": "bool",
+    "description": "拟人表达应用于私聊",
+    "default": true
+  },
+  "apply_to_group": {
+    "type": "bool",
+    "description": "拟人表达应用于群聊",
+    "default": true
+  },
+  "persona_overlay": {
+    "type": "text",
+    "description": "角色补充",
+    "hint": "补充稳定性格、关系边界或偏好，不会替换 AstrBot 当前人格。",
+    "default": ""
+  },
+  "reply_style": {
+    "type": "text",
+    "description": "基础表达风格",
+    "hint": "描述日常说话方式、长短和语气，建议写风格而不是固定台词。",
+    "default": "像熟悉网络聊天的人一样自然说话：语气平实、松弛、有温度，允许有轻微的个人偏好和幽默感。短话题就简短接话，复杂问题才展开；不用刻意完整，不把每次聊天都写成说明书。"
+  },
+  "private_chat_style": {
+    "type": "text",
+    "description": "私聊场景规则",
+    "default": "把私聊当作持续的双人对话。留意对方当下更需要共情、陪伴、确认还是解决方案，不要在对方只是分享感受时立刻输出一整套建议。"
+  },
+  "group_chat_style": {
+    "type": "text",
+    "description": "群聊场景规则",
+    "default": "把自己当作群聊参与者之一。先读懂当前话题和气氛，只回应真正相关的部分；不要逐条点评所有人，也不要把随口闲聊强行升级成答疑。"
+  },
+  "adaptive_style": {
+    "type": "bool",
+    "description": "适应近期聊天风格",
+    "hint": "从当前上下文轻量借用反复出现的措辞和圈内用语，不会额外训练模型。",
+    "default": true
+  },
+  "expression_habits": {
+    "type": "template_list",
+    "description": "管理员配置的场景化表达习惯",
+    "default": [],
+    "templates": {
+      "habit": {
+        "name": "表达习惯",
+        "display_item": "situation",
+        "hide_hint_in_list": true,
+        "items": {
+          "situation": {
+            "type": "string",
+            "description": "使用情境",
+            "hint": "例如：对方分享小成果",
+            "default": ""
+          },
+          "style": {
+            "type": "string",
+            "description": "表达方式",
+            "hint": "例如：先简短真诚地肯定，再顺着细节接一句",
+            "default": ""
+          }
+        }
+      }
+    }
+  },
+  "style_variation_probability": {
+    "type": "float",
+    "description": "单轮备用风格触发概率",
+    "default": 0.2,
+    "slider": {
+      "min": 0,
+      "max": 1,
+      "step": 0.05
+    }
+  },
+  "alternate_styles": {
+    "type": "list",
+    "description": "备用表达风格",
+    "default": [
+      "这次更简短一些，像自然地随口接话，不额外展开。",
+      "这次可以带一点轻微幽默或吐槽，但不要抢过话题。",
+      "这次语气更柔和一些，先接住对方的感受。"
+    ]
+  },
+  "avoid_phrases": {
+    "type": "list",
+    "description": "尽量避免的口头禅",
+    "default": [
+      "当然可以",
+      "没问题",
+      "希望对你有帮助",
+      "如果还有其他问题"
+    ]
+  },
+  "autonomous_reply_enabled": {
+    "type": "bool",
+    "description": "启用群聊自主发言 Planner",
+    "hint": "会产生额外模型调用。启用前必须关闭 AstrBot 核心的主动回复，否则插件会暂停 Planner 以避免重复发言。",
+    "default": false
+  },
+  "planner_bot_name": {
+    "type": "string",
+    "description": "Planner 使用的机器人名称",
+    "default": "机器人"
+  },
+  "behavior_style": {
+    "type": "text",
+    "description": "发言行为偏好",
+    "hint": "只影响 Planner 判断什么时候参与或沉默，不是最终说话风格。",
+    "default": "先观察聊天上下文和其他人的反应，再决定是否参与。只在被提及、对话明显在等待回应、对话题确实感兴趣或能够自然推进聊天时开口；不适合参与时保持安静。"
+  },
+  "planner_provider_id": {
+    "type": "string",
+    "description": "Planner 模型提供商",
+    "hint": "留空时使用当前聊天模型。建议选择便宜、JSON 遵循能力好的模型。",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "autonomous_reply_whitelist": {
+    "type": "list",
+    "description": "自主发言群聊白名单",
+    "hint": "填写群 ID 或 unified message origin。为空时允许所有群聊。",
+    "default": []
+  },
+  "planner_decision_interval": {
+    "type": "int",
+    "description": "每多少条群消息调用一次 Planner",
+    "default": 2
+  },
+  "planner_context_messages": {
+    "type": "int",
+    "description": "Planner 查看最近消息数",
+    "default": 12
+  },
+  "autonomous_reply_cooldown_seconds": {
+    "type": "float",
+    "description": "自主发言冷却秒数",
+    "default": 60
+  },
+  "autonomous_reply_confidence_threshold": {
+    "type": "float",
+    "description": "自主发言置信度阈值",
+    "default": 0.72,
+    "slider": {
+      "min": 0,
+      "max": 1,
+      "step": 0.01
+    }
+  },
+  "focus_mode_enabled": {
+    "type": "bool",
+    "description": "启用跨聊天 Focus",
+    "hint": "自主发言同一时间只关注一个群聊。普通消息需等待当前关注超时，明确唤醒机器人可立即切换。",
+    "default": false
+  },
+  "focus_chat_whitelist": {
+    "type": "list",
+    "description": "Focus 群聊白名单",
+    "hint": "填写群 ID 或 unified message origin。为空时 Focus 作用于所有允许自主发言的群聊。",
+    "default": []
+  },
+  "focus_hold_seconds": {
+    "type": "float",
+    "description": "Focus 保持秒数",
+    "hint": "当前关注聊天在这段时间没有新消息后，其他聊天才能取得关注槽。",
+    "default": 120
+  },
+  "behavior_learning_enabled": {
+    "type": "bool",
+    "description": "启用自主发言行为反馈学习",
+    "hint": "机器人自主发言后观察真实后续消息，额外调用一次模型评估社交效果，并把经验提供给之后的 Planner。",
+    "default": false
+  },
+  "behavior_feedback_provider_id": {
+    "type": "string",
+    "description": "行为反馈评估模型提供商",
+    "hint": "留空时依次使用学习模型和当前聊天模型。模型必须能可靠输出 JSON。",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "behavior_feedback_messages": {
+    "type": "int",
+    "description": "评估一次自主发言所需的后续消息数",
+    "default": 3
+  },
+  "max_behavior_experiences_per_scope": {
+    "type": "int",
+    "description": "每个聊天最多保存的行为经验数",
+    "default": 40
+  },
+  "episodic_memory_enabled": {
+    "type": "bool",
+    "description": "启用中期聊天回想",
+    "hint": "复用社会学习批次，把有后续价值的共同经历、公开约定和话题进展压缩为摘要，并在相关时召回。",
+    "default": false
+  },
+  "max_episodic_memories_per_scope": {
+    "type": "int",
+    "description": "每个聊天最多保存的回想数",
+    "default": 60
+  },
+  "memory_recall_count": {
+    "type": "int",
+    "description": "单轮最多召回的聊天回想数",
+    "default": 3
+  },
+  "expression_learning_enabled": {
+    "type": "bool",
+    "description": "自动学习表达习惯",
+    "hint": "达到批次大小后调用一次学习模型，并按聊天隔离持久化。",
+    "default": false
+  },
+  "jargon_learning_enabled": {
+    "type": "bool",
+    "description": "自动学习圈内黑话",
+    "hint": "只收录有来源证据且置信度至少为 0.6 的特殊词语。",
+    "default": false
+  },
+  "profile_learning_enabled": {
+    "type": "bool",
+    "description": "自动学习低敏感度人物事实",
+    "hint": "涉及隐私与额外模型成本，默认关闭。仅允许明确自述的稳定偏好等低敏感度信息。",
+    "default": false
+  },
+  "learn_private_chats": {
+    "type": "bool",
+    "description": "允许观察和学习私聊",
+    "hint": "默认不观察私聊。启用前应确保符合你的隐私告知和数据处理要求。",
+    "default": false
+  },
+  "inject_profiles_in_group": {
+    "type": "bool",
+    "description": "允许在群聊引用当前用户事实",
+    "hint": "默认关闭，避免把私聊或人物信息不恰当地带入群聊。",
+    "default": false
+  },
+  "learner_provider_id": {
+    "type": "string",
+    "description": "学习模型提供商",
+    "hint": "留空时使用当前聊天模型。模型必须能可靠输出 JSON。",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "learning_batch_size": {
+    "type": "int",
+    "description": "自动学习批次消息数",
+    "default": 12
+  },
+  "max_buffer_messages": {
+    "type": "int",
+    "description": "每个聊天最多保留的近期消息数",
+    "default": 80
+  },
+  "max_learning_message_length": {
+    "type": "int",
+    "description": "单条学习消息最大字符数",
+    "default": 500
+  },
+  "max_learned_expressions_per_scope": {
+    "type": "int",
+    "description": "每个聊天最多保存的表达习惯数",
+    "default": 80
+  },
+  "max_learned_jargon_per_scope": {
+    "type": "int",
+    "description": "每个聊天最多保存的黑话数",
+    "default": 80
+  },
+  "max_profile_facts_per_user": {
+    "type": "int",
+    "description": "每个用户最多保存的人物事实数",
+    "default": 30
+  },
+  "inject_recent_group_context": {
+    "type": "bool",
+    "description": "注入插件记录的近期群聊",
+    "hint": "AstrBot 群聊上下文已启用时会自动跳过，避免重复上下文。",
+    "default": true
+  },
+  "context_injection_messages": {
+    "type": "int",
+    "description": "回复时注入的近期群聊消息数",
+    "default": 8
+  }
+}
