@@ -1,8 +1,8 @@
 name: astrbot_plugin_maihumanizer
 display_name: Mai for AstrBot
-short_desc: 将 MaiBot 式发言决策、聊天回想、行为反馈、Focus 和社会化学习带到 AstrBot。
-desc: Bring MaiBot-inspired autonomous reply planning, episodic chat recall, outcome-based behavior learning, cross-chat Focus, social learning, and natural conversational style to AstrBot.
-version: v0.4.0
+short_desc: 融合 MaiBot 的决策学习与 Neo-MoFox 的话题衔接，让 AstrBot 更自然地交流。
+desc: Adapt MaiBot-inspired planning and social learning with Neo-MoFox-inspired conversation framing, reply thread focus, and natural expression to AstrBot.
+version: v0.6.0
 author: AstrBot Community
 repo: https://github.com/Sagiri777/astrbot_plugin_maibot
 astrbot_version: ">=4.24.0"

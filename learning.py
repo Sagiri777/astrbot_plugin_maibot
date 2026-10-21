@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any
 
+from .validation import bounded_float, contains_term, evidence_ids, json_object
+
 _SENSITIVE_MEMORY_MARKERS = (
     "密码",
     "身份证",
@@ -60,7 +62,8 @@ def build_learning_prompts(
         "3. 表达习惯必须写成可泛化的“情境—表达方式”，并给出 1 到 5 个短触发词。\n"
         "4. 黑话必须是脱离当前圈子不容易理解的缩写、梗或特殊短语；普通词不要收录。\n"
         "5. 人物事实只允许稳定、低敏感度的公开偏好或自我描述。禁止提取联系方式、账号、"
-        "精确地址、密码、财务、医疗、身份凭证、私人关系猜测和其他敏感信息。\n"
+        "精确地址、密码、财务、医疗、身份凭证、私人关系猜测和其他敏感信息。"
+        "角色扮演、假设场景和临时情绪不当作现实人物事实。\n"
         "6. 不推断性别、年龄、职业、疾病或关系；只有说话者明确自述且属于允许范围才记录。\n"
         "7. 聊天回想只记录有后续价值的共同经历、公开约定、项目进展或持续话题。"
         "寒暄、单句问答、临时情绪和未形成结果的碎片不要记录；摘要不得包含敏感信息。\n"
@@ -88,6 +91,7 @@ def parse_learning_result(
     learn_jargon: bool,
     learn_profiles: bool,
     learn_memories: bool = False,
+    source_messages: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Parse a learning response and discard unsupported records.
 
@@ -99,6 +103,7 @@ def parse_learning_result(
         learn_jargon: Whether jargon records are accepted.
         learn_profiles: Whether profile records are accepted.
         learn_memories: Whether episodic memory records are accepted.
+        source_messages: Source text and speaker mapping for evidence attribution.
 
     Returns:
         Normalized expression, jargon, profile, and episodic memory records.
@@ -109,21 +114,8 @@ def parse_learning_result(
         "profiles": [],
         "memories": [],
     }
-    text = (raw_response or "").strip()
-    if not text:
-        return empty_result
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        object_start = text.find("{")
-        object_end = text.rfind("}")
-        if object_start < 0 or object_end <= object_start:
-            return empty_result
-        try:
-            parsed = json.loads(text[object_start : object_end + 1])
-        except json.JSONDecodeError:
-            return empty_result
-    if not isinstance(parsed, dict):
+    parsed = json_object(raw_response)
+    if not parsed:
         return empty_result
 
     if learn_expressions and isinstance(parsed.get("expressions"), list):
@@ -132,11 +124,7 @@ def parse_learning_result(
                 continue
             situation = str(item.get("situation", "") or "").strip()[:80]
             style = str(item.get("style", "") or "").strip()[:120]
-            source_ids = [
-                str(source_id)
-                for source_id in item.get("source_ids", [])
-                if str(source_id) in valid_source_ids
-            ][:6]
+            source_ids = evidence_ids(item.get("source_ids"), valid_source_ids, 6)
             raw_keywords = item.get("keywords", [])
             keywords = (
                 [
@@ -163,16 +151,16 @@ def parse_learning_result(
                 continue
             term = str(item.get("term", "") or "").strip()[:32]
             meaning = str(item.get("meaning", "") or "").strip()[:160]
-            source_ids = [
-                str(source_id)
-                for source_id in item.get("source_ids", [])
-                if str(source_id) in valid_source_ids
-            ][:6]
-            try:
-                confidence = float(item.get("confidence", 0.0))
-            except (TypeError, ValueError):
-                confidence = 0.0
-            confidence = min(max(confidence, 0.0), 1.0)
+            source_ids = evidence_ids(item.get("source_ids"), valid_source_ids, 6)
+            confidence = bounded_float(item.get("confidence"), 0.0, 1.0)
+            if source_messages is not None:
+                source_ids = [
+                    source_id
+                    for source_id in source_ids
+                    if contains_term(
+                        term, source_messages.get(source_id, {}).get("text", "")
+                    )
+                ]
             if term and meaning and source_ids and confidence >= 0.6:
                 empty_result["jargon"].append(
                     {
@@ -198,11 +186,16 @@ def parse_learning_result(
                 if not isinstance(raw_fact, dict):
                     continue
                 fact = str(raw_fact.get("fact", "") or "").strip()[:160]
-                source_ids = [
-                    str(source_id)
-                    for source_id in raw_fact.get("source_ids", [])
-                    if str(source_id) in valid_source_ids
-                ][:6]
+                source_ids = evidence_ids(
+                    raw_fact.get("source_ids"), valid_source_ids, 6
+                )
+                if source_messages is not None:
+                    source_ids = [
+                        source_id
+                        for source_id in source_ids
+                        if source_messages.get(source_id, {}).get("speaker_id")
+                        == speaker_id
+                    ]
                 if fact and source_ids:
                     normalized_facts.append({"fact": fact, "source_ids": source_ids})
             if normalized_facts:
@@ -216,16 +209,7 @@ def parse_learning_result(
                 continue
             title = str(item.get("title", "") or "").strip()[:80]
             summary = str(item.get("summary", "") or "").strip()[:280]
-            raw_source_ids = item.get("source_ids", [])
-            source_ids = (
-                [
-                    str(source_id)
-                    for source_id in raw_source_ids
-                    if str(source_id) in valid_source_ids
-                ][:10]
-                if isinstance(raw_source_ids, list)
-                else []
-            )
+            source_ids = evidence_ids(item.get("source_ids"), valid_source_ids, 10)
             raw_cues = item.get("recall_cues", [])
             recall_cues = (
                 list(
@@ -236,11 +220,7 @@ def parse_learning_result(
                 if isinstance(raw_cues, list)
                 else []
             )
-            try:
-                importance = float(item.get("importance", 0.0))
-            except (TypeError, ValueError):
-                importance = 0.0
-            importance = min(max(importance, 0.0), 1.0)
+            importance = bounded_float(item.get("importance"), 0.0, 1.0)
             memory_text = f"{title}\n{summary}"
             contains_sensitive_data = any(
                 marker in memory_text for marker in _SENSITIVE_MEMORY_MARKERS
@@ -304,8 +284,7 @@ def select_episodic_memories(
             sum(
                 1
                 for cue in raw_cues
-                if str(cue).strip()
-                and str(cue).strip().casefold() in normalized_context
+                if str(cue).strip() and contains_term(str(cue), normalized_context)
             )
             if isinstance(raw_cues, list)
             else 0

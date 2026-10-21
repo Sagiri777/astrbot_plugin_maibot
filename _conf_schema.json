@@ -43,6 +43,12 @@
     "hint": "从当前上下文轻量借用反复出现的措辞和圈内用语，不会额外训练模型。",
     "default": true
   },
+  "interaction_context_enabled": {
+    "type": "bool",
+    "description": "互动衔接与话题定位",
+    "hint": "吸收 Neo-MoFox 的互动设计：按真实引用关系聚焦群聊支线、优先最新情境，并参考近期实际回复避免重复追问。只组织现有上下文，不增加模型调用。",
+    "default": true
+  },
   "expression_habits": {
     "type": "template_list",
     "description": "管理员配置的场景化表达习惯",
@@ -72,12 +78,13 @@
   "style_variation_probability": {
     "type": "float",
     "description": "单轮备用风格触发概率",
-    "default": 0.2,
+    "default": 0.0,
     "slider": {
       "min": 0,
       "max": 1,
       "step": 0.05
-    }
+    },
+    "hint": "默认关闭随机语气变化，优先保持当前人格和话题语境。旧配置的非零值仍然生效。"
   },
   "alternate_styles": {
     "type": "list",
@@ -287,5 +294,25 @@
     "type": "int",
     "description": "回复时注入的近期群聊消息数",
     "default": 8
+  },
+  "expression_selection_enabled": {
+    "type": "bool",
+    "description": "回复前按语义筛选表达习惯",
+    "hint": "参考 MaiBot 的表达二次选择，结合当前消息、近期聊天和回复意图选择 0 到 3 条；有候选时每轮增加一次模型调用。默认使用本地关键词匹配，无相关表达不注入。",
+    "default": false
+  },
+  "expression_selector_provider_id": {
+    "type": "string",
+    "description": "表达筛选模型提供商",
+    "hint": "留空使用当前聊天模型；建议选择快速且能可靠输出 JSON 的模型。超时或无合适表达时只使用人格风格。",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "evaluation_judge_provider_id": {
+    "type": "string",
+    "description": "/maieval 盲评模型提供商",
+    "hint": "留空使用当前聊天模型，可指定独立模型降低自评偏差。仅管理员执行 /maieval 时调用。",
+    "default": "",
+    "_special": "select_provider"
   }
 }

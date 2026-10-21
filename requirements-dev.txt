@@ -1,0 +1,4 @@
+astrbot==4.29.1
+pytest>=8.4,<10
+pytest-asyncio>=1.1,<2
+ruff==0.17.1

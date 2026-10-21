@@ -7,7 +7,6 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from astrbot.api.provider import ProviderRequest
 from astrbot.core.message.message_event_result import MessageEventResult
 
@@ -44,6 +43,10 @@ def _event(*, private: bool) -> MagicMock:
     event.get_sender_name.return_value = "Alice"
     event.get_self_id.return_value = "bot-1"
     event.get_group_id.return_value = "" if private else "group-1"
+    extras = {}
+    event.get_extra.side_effect = lambda key, default=None: extras.get(key, default)
+    event.set_extra.side_effect = lambda key, value: extras.__setitem__(key, value)
+    event.is_at_or_wake_command = False
     return event
 
 

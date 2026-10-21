@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .validation import bounded_float, json_object
+
 
 def build_planner_prompts(
     *,
@@ -12,6 +14,8 @@ def build_planner_prompts(
     current_message_id: str,
     behavior_experiences: list[dict[str, Any]] | None = None,
     episodic_memories: list[dict[str, Any]] | None = None,
+    current_addressing: dict[str, Any] | None = None,
+    decision_history: list[dict[str, Any]] | None = None,
 ) -> tuple[str, str]:
     """Build the prompts used by the autonomous reply planner.
 
@@ -22,6 +26,8 @@ def build_planner_prompts(
         current_message_id: Source ID of the message being evaluated.
         behavior_experiences: Relevant outcomes from earlier autonomous replies.
         episodic_memories: Relevant summaries from earlier chat episodes.
+        current_addressing: Exact platform IDs and quote metadata for the new event.
+        decision_history: Recent decisions, with actual delivery status.
 
     Returns:
         A tuple containing the system prompt and user prompt.
@@ -63,7 +69,18 @@ def build_planner_prompts(
         "2. 他人正在彼此交谈、话题已经结束、插话会打断气氛、只能重复别人观点时，保持安静。\n"
         "3. 不要为了活跃而回复每条消息；真人经常只看不说。\n"
         "4. 不以消息是否合法、安全或能否回答作为唯一标准；这里只判断社交时机。\n"
-        "5. 不编造上下文中不存在的关系和意图。\n\n"
+        "5. 不编造上下文中不存在的关系和意图。\n"
+        "6. role=assistant 是机器人已经发送的真实回复。不要重复回答已回应的话题，"
+        "也不要把自己的发言误认为其他人在邀请你说话。\n"
+        "7. reply_guide 必须紧扣 current_message_id 对应的最新消息，明确回应对象、"
+        "本轮要回应的内容及应避免的重复内容；不得伪造事实或替代用户要求。\n\n"
+        "8. conversation_context 是此前背景，latest_events 是刚发生的消息；最新明确表达"
+        "可以纠正、结束旧话题。群聊存在平行支线，优先跟随本轮引用与相关对话，不总结全部背景。\n"
+        "9. 精准 @ 或引用是否指向机器人以 current_message_addressing 中的 ID 为准，"
+        "昵称相同不代表同一个人。提及别人不自动排除开放讨论，也不自动邀请机器人插话。\n"
+        "10. recent_decisions 是过去的判断，不是发言。只有 delivered=true 表示那次回复"
+        "已经发送；未发送的计划不能算作对方听过的话。先前沉默不阻止回应新的明确请求，"
+        "先前打算参与也不要求在话题结束后继续参与。不要重复追问无人回应的问题。\n\n"
         f"行为偏好：{behavior_style}"
         f"{experience_text}"
         f"{memory_text}\n\n"
@@ -75,7 +92,18 @@ def build_planner_prompts(
     user_prompt = json.dumps(
         {
             "current_message_id": current_message_id,
-            "messages": recent_messages,
+            "conversation_context": [
+                item
+                for item in recent_messages
+                if item.get("source_id") != current_message_id
+            ],
+            "latest_events": [
+                item
+                for item in recent_messages
+                if item.get("source_id") == current_message_id
+            ],
+            "current_message_addressing": current_addressing or {},
+            "recent_decisions": (decision_history or [])[-4:],
         },
         ensure_ascii=False,
     )
@@ -98,33 +126,19 @@ def parse_planner_decision(raw_response: str) -> dict[str, Any]:
         "reply_guide": "",
         "tone": "",
     }
-    text = (raw_response or "").strip()
-    if not text:
-        return fallback
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        object_start = text.find("{")
-        object_end = text.rfind("}")
-        if object_start < 0 or object_end <= object_start:
-            return fallback
-        try:
-            parsed = json.loads(text[object_start : object_end + 1])
-        except json.JSONDecodeError:
-            return fallback
-    if not isinstance(parsed, dict):
+    parsed = json_object(raw_response)
+    if not parsed:
         return fallback
 
     action = str(parsed.get("action", "") or "").strip().lower()
     if action not in {"reply", "ignore"}:
         return fallback
-    try:
-        confidence = float(parsed.get("confidence", 0.0))
-    except (TypeError, ValueError):
-        confidence = 0.0
+    confidence = bounded_float(parsed.get("confidence"), 0.0, 1.0, default=-1.0)
+    if confidence < 0:
+        return fallback
     return {
         "action": action,
-        "confidence": min(max(confidence, 0.0), 1.0),
+        "confidence": confidence,
         "reason": str(parsed.get("reason", "") or "").strip()[:200],
         "reply_guide": str(parsed.get("reply_guide", "") or "").strip()[:500],
         "tone": str(parsed.get("tone", "") or "").strip()[:100],

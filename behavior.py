@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .validation import bounded_float, contains_term, evidence_ids, json_object
+
 
 def build_behavior_feedback_prompts(
     *,
@@ -74,31 +76,14 @@ def parse_behavior_feedback_result(
     Returns:
         A normalized behavior experience, or ``None`` when unsupported.
     """
-    text = str(raw_response or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        object_start = text.find("{")
-        object_end = text.rfind("}")
-        if object_start < 0 or object_end <= object_start:
-            return None
-        try:
-            parsed = json.loads(text[object_start : object_end + 1])
-        except json.JSONDecodeError:
-            return None
-    if not isinstance(parsed, dict):
+    parsed = json_object(raw_response)
+    if not parsed:
         return None
 
     status = str(parsed.get("status", "") or "").strip().casefold()
     if status not in {"success", "partial", "failure", "unclear"}:
         return None
-    source_ids = [
-        str(source_id)
-        for source_id in parsed.get("source_ids", [])
-        if str(source_id) in valid_feedback_source_ids
-    ][:8]
+    source_ids = evidence_ids(parsed.get("source_ids"), valid_feedback_source_ids)
     if status == "unclear" or not source_ids:
         return None
 
@@ -121,11 +106,9 @@ def parse_behavior_feedback_result(
         if isinstance(raw_keywords, list)
         else []
     )
-    try:
-        score_delta = float(parsed.get("score_delta", 0.0))
-    except (TypeError, ValueError):
-        score_delta = 0.0
-    score_delta = min(max(score_delta, -1.0), 1.0)
+    score_delta = bounded_float(parsed.get("score_delta"), -1.0, 1.0, default=-2.0)
+    if score_delta < -1.0:
+        return None
     if status == "success":
         score_delta = max(score_delta, 0.1)
     elif status == "failure":
@@ -180,7 +163,7 @@ def select_behavior_experiences(
                 1
                 for keyword in raw_keywords
                 if str(keyword).strip()
-                and str(keyword).strip().casefold() in normalized_context
+                and contains_term(str(keyword), normalized_context)
             )
             if isinstance(raw_keywords, list)
             else 0
@@ -210,4 +193,4 @@ def select_behavior_experiences(
     matched = [item for hits, _weight, item in candidates if hits > 0]
     if matched:
         return matched[: max(int(limit), 0)]
-    return [item for _hits, _weight, item in candidates[: max(int(limit), 0)]]
+    return []
