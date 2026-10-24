@@ -43,10 +43,28 @@
     "hint": "从当前上下文轻量借用反复出现的措辞和圈内用语，不会额外训练模型。",
     "default": true
   },
+  "social_register_enabled": {
+    "type": "bool",
+    "description": "跟随真实群聊节奏并避免复读自己",
+    "hint": "本地分析近期真人句长、当前闲聊意图和机器人重复开头/收尾，每轮动态调整表达；不增加模型调用。正式任务与明确角色扮演自动跳过。",
+    "default": true
+  },
+  "output_cleanup_enabled": {
+    "type": "bool",
+    "description": "清理角色扮演旁白与机械收尾",
+    "hint": "保守移除未要求的动作/神态/内心旁白和常见客服式结尾。代码、结构化任务和明确角色扮演请求不会被改写。",
+    "default": true
+  },
   "interaction_context_enabled": {
     "type": "bool",
     "description": "互动衔接与话题定位",
     "hint": "吸收 Neo-MoFox 的互动设计：按真实引用关系聚焦群聊支线、优先最新情境，并参考近期实际回复避免重复追问。只组织现有上下文，不增加模型调用。",
+    "default": true
+  },
+  "conversation_focus_enabled": {
+    "type": "bool",
+    "description": "低信息量接话时定位附近实质话题",
+    "hint": "当最新一条只是“哈哈”“确实”等短接话时，Planner 可参考最近四条真人消息中更值得回应的一条。最新明确提及、引用、提问和任务始终优先，不会用旧话题覆盖新请求。",
     "default": true
   },
   "expression_habits": {
@@ -149,6 +167,12 @@
     "type": "float",
     "description": "自主发言冷却秒数",
     "default": 60
+  },
+  "max_autonomous_reply_streak": {
+    "type": "int",
+    "description": "最多连续自主发言次数",
+    "hint": "达到次数后至少静默一次，让其他群友有参与空间；精准提及机器人不受限制。设为 0 关闭此限制。普通冷却与置信度规则仍然生效。",
+    "default": 2
   },
   "autonomous_reply_confidence_threshold": {
     "type": "float",
