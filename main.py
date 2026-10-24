@@ -38,6 +38,11 @@ from .learning import (
     parse_learning_result,
     select_episodic_memories,
 )
+from .naturalness import (
+    build_naturalness_hint,
+    clean_visible_reply,
+    delivered_reply_streak,
+)
 from .planner import build_planner_prompts, parse_planner_decision
 from .validation import bounded_float, contains_term
 
@@ -280,8 +285,9 @@ class MaiHumanizerPlugin(Star):
 
         sections = [
             _PROMPT_MARKER,
-            "你仍然是上文 AstrBot 人格中定义的同一个角色。以下规则只补充互动方式，"
-            "不覆盖已有身份、事实、安全边界或用户明确要求。",
+            "保留上文 AstrBot 人格中的身份与偏好，但日常交流不要表演人设："
+            "把性格当作说话倾向，而不是需要逐句展示的角色设定。以下规则不覆盖"
+            "已有事实、安全边界或用户明确要求。",
         ]
         if persona_overlay:
             sections.append(f"【角色补充】\n{persona_overlay}")
@@ -295,11 +301,17 @@ class MaiHumanizerPlugin(Star):
                     "- 先回应对方真正关心的部分；有情绪时先建立连接，再视需要给建议。\n"
                     "- 可以表达温和的偏好、犹豫、惊讶或不同意见，但不要编造经历、关系、"
                     "记忆和事实，也不要为了像人而故意答错。\n"
-                    "- 不必每次都复述问题、总结全文、主动追问或表示随时可以继续帮忙。"
+                    "- 不必每次都复述问题、总结全文、主动追问或表示随时可以继续帮忙。\n"
+                    "- 群友不是客服、主持人或总结员：不控场，不逐条点评，不为了显得积极"
+                    "而接每句话，也不把普通闲聊包装成一次服务。"
                 ),
                 (
                     "【去模板化】\n"
                     "- 避免习惯性使用“当然可以”“没问题”“希望对你有帮助”等客服式套话。\n"
+                    "- 除非用户明确要求角色扮演，不写动作、神态、内心活动或舞台旁白，"
+                    "例如“（笑了笑）”“*歪头看你*”；直接说要说的话。\n"
+                    "- 不刻意模仿真人口误、打字错误或脏话，不堆砌语气词、表情包和“哈哈”"
+                    "来证明拟人；自然比表演更重要。\n"
                     "- 除非用户要求或内容确实复杂，不使用标题、Markdown 分点、结论先行的"
                     "报告格式，也不写机械的开场和收尾。\n"
                     "- 回复长度跟随语境：随口一问可以是一两句，认真讨论才自然展开；"
@@ -1106,6 +1118,7 @@ class MaiHumanizerPlugin(Star):
             behavior_records = copy.deepcopy(self._store["behaviors"].get(scope, []))
             memory_records = copy.deepcopy(self._store["memories"].get(scope, []))
             decision_history = copy.deepcopy(self._planner_decisions.get(scope, []))
+        reply_streak = delivered_reply_streak(decision_history)
         if bool(self.config.get("interaction_context_enabled", True)):
             recent_messages = focus_reply_thread(recent_messages, addressing)
             if not any(
@@ -1117,6 +1130,45 @@ class MaiHumanizerPlugin(Star):
         if decision_count % decision_interval != 0:
             return
         if time.monotonic() - last_reply < reply_cooldown:
+            return
+
+        try:
+            max_reply_streak = max(
+                int(self.config.get("max_autonomous_reply_streak", 2)),
+                0,
+            )
+        except (TypeError, ValueError):
+            max_reply_streak = 2
+        if (
+            max_reply_streak
+            and reply_streak >= max_reply_streak
+            and not addressing.get("addresses_bot")
+        ):
+            # A real pause, rather than another model call, breaks the streak.
+            async with self._state_lock:
+                latest_human = next(
+                    (
+                        item
+                        for item in reversed(self._buffers.get(scope, []))
+                        if item.get("role", "user") == "user"
+                    ),
+                    None,
+                )
+                if (
+                    latest_human is not None
+                    and latest_human["source_id"] == current_record["source_id"]
+                ):
+                    decisions = self._planner_decisions.setdefault(scope, [])
+                    decisions.append(
+                        {
+                            "source_id": current_record["source_id"],
+                            "action": "ignore",
+                            "confidence": 1.0,
+                            "reason": "连续参与后主动留出群聊空间",
+                            "delivered": False,
+                        }
+                    )
+                    del decisions[:-4]
             return
 
         planner_context_text = "\n".join(
@@ -1196,6 +1248,13 @@ class MaiHumanizerPlugin(Star):
             episodic_memories=episodic_memories,
             current_addressing=addressing,
             decision_history=decision_history,
+            participation_state={
+                "delivered_autonomous_reply_streak": reply_streak,
+                "bot_messages_in_visible_context": sum(
+                    item.get("role") == "assistant" for item in recent_messages
+                ),
+                "max_autonomous_reply_streak": max_reply_streak,
+            },
         )
         try:
             async with asyncio.timeout(30):
@@ -1343,6 +1402,14 @@ class MaiHumanizerPlugin(Star):
         if getattr(response, "role", "assistant") != "assistant":
             return
         completion_text = str(response.completion_text or "").strip()
+        if completion_text and bool(self.config.get("output_cleanup_enabled", True)):
+            cleaned_text = clean_visible_reply(
+                completion_text,
+                current_message=str(event.get_message_str() or ""),
+            )
+            if cleaned_text != completion_text:
+                response.completion_text = cleaned_text
+                completion_text = cleaned_text
         if completion_text:
             event.set_extra("_mai_generated_reply_text", completion_text[:800])
 
@@ -1555,6 +1622,14 @@ class MaiHumanizerPlugin(Star):
         if interaction_enabled:
             recent_messages = focus_reply_thread(recent_messages, addressing)
         recent_messages = recent_messages[-context_count:] if context_count > 0 else []
+        if bool(self.config.get("social_register_enabled", True)):
+            naturalness_hint = build_naturalness_hint(
+                current_message=str(req.prompt or ""),
+                recent_messages=recent_messages,
+                is_private_chat=is_private_chat,
+            )
+            if naturalness_hint:
+                runtime_sections.append(naturalness_hint)
         if interaction_enabled:
             interaction_hint = build_interaction_hint(
                 addressing, recent_messages=recent_messages, contexts=req.contexts
@@ -1850,9 +1925,20 @@ class MaiHumanizerPlugin(Star):
             focus_status = "当前聊天"
         else:
             focus_status = "被其他聊天占用"
+        register = (
+            "已启用"
+            if bool(self.config.get("social_register_enabled", True))
+            else "未启用"
+        )
+        cleanup = (
+            "已启用"
+            if bool(self.config.get("output_cleanup_enabled", True))
+            else "未启用"
+        )
         yield event.plain_result(
             f"Mai for AstrBot：{state}\n"
             f"自主发言 Planner：{autonomous}\n"
+            f"群聊语域适应：{register}；旁白清理：{cleanup}\n"
             f"当前场景：{'私聊' if event.is_private_chat() else '群聊'}\n"
             f"待学习消息：{buffered_count} 条"
             f"{'（正在学习）' if learning else ''}\n"
