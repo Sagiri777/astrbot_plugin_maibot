@@ -61,6 +61,12 @@
     "hint": "吸收 Neo-MoFox 的互动设计：按真实引用关系聚焦群聊支线、优先最新情境，并参考近期实际回复避免重复追问。只组织现有上下文，不增加模型调用。",
     "default": true
   },
+  "conversation_focus_enabled": {
+    "type": "bool",
+    "description": "低信息量接话时定位附近实质话题",
+    "hint": "当最新一条只是“哈哈”“确实”等短接话时，Planner 可参考最近四条真人消息中更值得回应的一条。最新明确提及、引用、提问和任务始终优先，不会用旧话题覆盖新请求。",
+    "default": true
+  },
   "expression_habits": {
     "type": "template_list",
     "description": "管理员配置的场景化表达习惯",
@@ -268,7 +274,7 @@
   "learner_provider_id": {
     "type": "string",
     "description": "学习模型提供商",
-    "hint": "留空时使用当前聊天模型。模型必须能可靠输出 JSON。",
+    "hint": "留空时使用当前聊天模型，或指定独立模型降低自评偏差。模型必须能可靠输出 JSON。",
     "default": "",
     "_special": "select_provider"
   },

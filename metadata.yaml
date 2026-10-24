@@ -2,7 +2,7 @@ name: astrbot_plugin_maihumanizer
 display_name: Mai for AstrBot
 short_desc: 融合 MaiBot 的决策学习与 Neo-MoFox 的话题衔接，让 AstrBot 更自然地交流。
 desc: Adapt MaiBot-inspired planning and social learning with Neo-MoFox-inspired conversation framing, reply thread focus, and natural expression to AstrBot.
-version: v0.7.0
+version: v0.8.0
 author: AstrBot Community
 repo: https://github.com/Sagiri777/astrbot_plugin_maibot
 astrbot_version: ">=4.24.0"
