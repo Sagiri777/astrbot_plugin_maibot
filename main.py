@@ -42,6 +42,8 @@ from .naturalness import (
     build_naturalness_hint,
     clean_visible_reply,
     delivered_reply_streak,
+    is_conversation_closing,
+    select_conversation_focus,
 )
 from .planner import build_planner_prompts, parse_planner_decision
 from .validation import bounded_float, contains_term
@@ -1127,6 +1129,17 @@ class MaiHumanizerPlugin(Star):
             ):
                 recent_messages.append(current_record)
         recent_messages = recent_messages[-planner_context_messages:]
+        focus_message = current_record
+        if bool(self.config.get("conversation_focus_enabled", True)):
+            focus_message = (
+                select_conversation_focus(
+                    recent_messages,
+                    current_message_id=current_record["source_id"],
+                    current_addressing=addressing,
+                )
+                or current_record
+            )
+        conversation_closing = is_conversation_closing(current_record["text"])
         if decision_count % decision_interval != 0:
             return
         if time.monotonic() - last_reply < reply_cooldown:
@@ -1255,6 +1268,15 @@ class MaiHumanizerPlugin(Star):
                 ),
                 "max_autonomous_reply_streak": max_reply_streak,
             },
+            focus_message={
+                "source_id": focus_message["source_id"],
+                "speaker_name": focus_message.get("speaker_name", ""),
+                "text": focus_message["text"],
+                "message_id": focus_message.get("message_id", ""),
+                "speaker_id": focus_message.get("speaker_id", ""),
+                "reply_to_id": focus_message.get("reply_to_id", ""),
+            },
+            conversation_closing=conversation_closing,
         )
         try:
             async with asyncio.timeout(30):
