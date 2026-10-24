@@ -16,6 +16,7 @@ def build_planner_prompts(
     episodic_memories: list[dict[str, Any]] | None = None,
     current_addressing: dict[str, Any] | None = None,
     decision_history: list[dict[str, Any]] | None = None,
+    participation_state: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     """Build the prompts used by the autonomous reply planner.
 
@@ -28,6 +29,7 @@ def build_planner_prompts(
         episodic_memories: Relevant summaries from earlier chat episodes.
         current_addressing: Exact platform IDs and quote metadata for the new event.
         decision_history: Recent decisions, with actual delivery status.
+        participation_state: Actual recent bot participation and reply streak.
 
     Returns:
         A tuple containing the system prompt and user prompt.
@@ -80,7 +82,10 @@ def build_planner_prompts(
         "昵称相同不代表同一个人。提及别人不自动排除开放讨论，也不自动邀请机器人插话。\n"
         "10. recent_decisions 是过去的判断，不是发言。只有 delivered=true 表示那次回复"
         "已经发送；未发送的计划不能算作对方听过的话。先前沉默不阻止回应新的明确请求，"
-        "先前打算参与也不要求在话题结束后继续参与。不要重复追问无人回应的问题。\n\n"
+        "先前打算参与也不要求在话题结束后继续参与。不要重复追问无人回应的问题。\n"
+        "11. participation_state 只统计真实发言与已送达的自主回复。连续参与较多时，"
+        "即使没有冷却也应更倾向把空间留给其他群友；不要形成逢话必接或固定轮流发言的节奏。"
+        "只有新的明确提及或直接请求可以突破这种沉默倾向。\n\n"
         f"行为偏好：{behavior_style}"
         f"{experience_text}"
         f"{memory_text}\n\n"
@@ -104,6 +109,7 @@ def build_planner_prompts(
             ],
             "current_message_addressing": current_addressing or {},
             "recent_decisions": (decision_history or [])[-4:],
+            "participation_state": participation_state or {},
         },
         ensure_ascii=False,
     )
