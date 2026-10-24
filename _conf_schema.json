@@ -274,7 +274,7 @@
   "learner_provider_id": {
     "type": "string",
     "description": "学习模型提供商",
-    "hint": "留空时使用当前聊天模型，或指定独立模型降低自评偏差。模型必须能可靠输出 JSON。",
+    "hint": "留空时使用当前聊天模型。模型必须能可靠输出 JSON。",
     "default": "",
     "_special": "select_provider"
   },
