@@ -299,7 +299,17 @@ def select_episodic_memories(
         candidates.append((cue_hits, importance, index, item))
 
     candidates.sort(
-        key=lambda candidate: (candidate[0], candidate[1], candidate[2]),
+        key=lambda candidate: (
+            candidate[0],
+            candidate[1],
+            str(
+                candidate[3].get("updated_at")
+                or candidate[3].get("event_time_end")
+                or candidate[3].get("created_at")
+                or ""
+            ),
+            candidate[2],
+        ),
         reverse=True,
     )
     matched = [item for hits, _importance, _index, item in candidates if hits > 0]

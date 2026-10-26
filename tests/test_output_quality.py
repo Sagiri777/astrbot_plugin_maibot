@@ -528,3 +528,160 @@ def test_evaluation_command_accepts_full_question_with_spaces():
         event.get_extra("parsed_params")["question"]
         == "请只返回 JSON including English words"
     )
+
+
+@pytest.mark.asyncio
+async def test_forget_user_waits_for_learning_in_other_chats():
+    context = _context()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def learn(**kwargs):
+        entered.set()
+        await release.wait()
+        return SimpleNamespace(
+            completion_text=json.dumps(
+                {
+                    "profiles": [
+                        {
+                            "speaker_id": "test-platform:user-1",
+                            "facts": [{"fact": "喜欢徒步", "source_ids": ["m1"]}],
+                        }
+                    ]
+                }
+            )
+        )
+
+    context.llm_generate = AsyncMock(side_effect=learn)
+    plugin = MaiHumanizerPlugin(context, {"profile_learning_enabled": True})
+    plugin._persist_store = AsyncMock()
+    plugin._store["profiles"]["test-platform:user-1"] = [
+        {"fact": "喜欢下棋", "scope": "test:session"}
+    ]
+    plugin._learning_scopes.add("other:session")
+    task = asyncio.create_task(
+        plugin._run_learning_batch(
+            "other:session",
+            [
+                {
+                    "source_id": "m1",
+                    "profile_key": "test-platform:user-1",
+                    "speaker_name": "Alice",
+                    "text": "我喜欢徒步",
+                    "timestamp": "2026-10-26T10:00:00+00:00",
+                }
+            ],
+        )
+    )
+    event = _event(private=False)
+    event.plain_result.side_effect = lambda text: text
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        reports = [item async for item in plugin.forget_knowledge(event, "user")]
+        assert "等待完成" in reports[0]
+        assert "test-platform:user-1" in plugin._store["profiles"]
+    finally:
+        release.set()
+        await asyncio.wait_for(task, 2)
+
+    reports = [item async for item in plugin.forget_knowledge(event, "user")]
+    assert "共 2 条" in reports[0]
+    assert "test-platform:user-1" not in plugin._store["profiles"]
+
+
+@pytest.mark.parametrize("keyword_match", [False, True])
+@pytest.mark.parametrize("newest_first", [False, True])
+def test_memory_recall_prefers_recent_records_independently_of_storage_order(
+    keyword_match, newest_first
+):
+    records = [
+        {
+            "title": title,
+            "summary": "大家讨论了发布安排。",
+            "recall_cues": ["发布"],
+            "importance": 0.8,
+            "updated_at": timestamp,
+        }
+        for title, timestamp in [
+            ("旧安排", "2026-10-20T10:00:00+00:00"),
+            ("最新安排", "2026-10-26T10:00:00+00:00"),
+        ]
+    ]
+    if newest_first:
+        records.reverse()
+    recalled = learning.select_episodic_memories(
+        records, context_text="发布安排" if keyword_match else "上次那件事", limit=1
+    )
+    assert recalled[0]["title"] == "最新安排"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("switch_focus", [False, True])
+@pytest.mark.parametrize("waiting_for", ["planner", "conversation"])
+@pytest.mark.parametrize("focus_applies", [False, True])
+async def test_pending_planner_respects_focus_at_each_await(
+    switch_focus, waiting_for, focus_applies
+):
+    context = _context()
+    context.conversation_manager.get_curr_conversation_id = AsyncMock(
+        return_value="conversation-1"
+    )
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def pause():
+        entered.set()
+        await release.wait()
+
+    async def plan(**kwargs):
+        if waiting_for == "planner":
+            await pause()
+        return SimpleNamespace(
+            completion_text='{"action":"reply","confidence":0.95,"reply_guide":"接话"}'
+        )
+
+    async def conversation(*args):
+        if waiting_for == "conversation":
+            await pause()
+        return SimpleNamespace(cid="conversation-1")
+
+    context.llm_generate = AsyncMock(side_effect=plan)
+    context.conversation_manager.get_conversation = AsyncMock(side_effect=conversation)
+    plugin = MaiHumanizerPlugin(
+        context,
+        {
+            "autonomous_reply_enabled": True,
+            "planner_decision_interval": 1,
+            "autonomous_reply_cooldown_seconds": 0,
+            "focus_mode_enabled": True,
+            "focus_chat_whitelist": [] if focus_applies else ["other:session"],
+        },
+    )
+    event = _event(private=False)
+    event.get_message_str.return_value = "有人吗"
+
+    async def collect():
+        return [item async for item in plugin.observe_and_plan(event)]
+
+    task = asyncio.create_task(collect())
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        if switch_focus:
+            other = _event(private=False)
+            other.unified_msg_origin = "other:session"
+            other.get_message_str.return_value = "机器人过来看看"
+            other.is_at_or_wake_command = True
+            assert [item async for item in plugin.observe_and_plan(other)] == []
+            assert plugin._focused_scope == "other:session"
+        else:
+            assert [item async for item in plugin.manage_focus(event, "release")]
+    finally:
+        release.set()
+        results = await asyncio.wait_for(task, 2)
+
+    if focus_applies:
+        assert results == []
+        event.request_llm.assert_not_called()
+        assert not event.get_extra("_mai_autonomous_reply", False)
+    else:
+        assert len(results) == 1
+        event.request_llm.assert_called_once()
+    assert plugin._planning_scopes == set()

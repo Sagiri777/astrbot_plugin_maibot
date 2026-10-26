@@ -158,11 +158,14 @@ def _remove_stage_direction(match: re.Match[str]) -> str:
     return "" if _is_stage_direction(content) else token
 
 
-def clean_visible_reply(text: str, *, current_message: str = "") -> str:
+def clean_visible_reply(
+    text: str, *, current_message: str = "", allow_empty: bool = False
+) -> str:
     """Conservatively remove roleplay directions and stock casual closers.
 
     Code, structured tasks and explicit roleplay are deliberately left untouched.
-    The original text is returned if cleanup would accidentally erase everything.
+    The original text is returned if cleanup would accidentally erase everything,
+    unless this is a component within a reply that still has other visible text.
     """
     original = str(text or "")
     if (
@@ -184,7 +187,7 @@ def clean_visible_reply(text: str, *, current_message: str = "") -> str:
     cleaned = _STAGE_DIRECTION_RE.sub(_remove_stage_direction, "\n".join(cleaned_lines))
     cleaned = _BOILERPLATE_SUFFIX_RE.sub("", cleaned).strip()
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    return cleaned if cleaned.strip() else original
+    return cleaned if cleaned.strip() or allow_empty else original
 
 
 def _repeated_edge(texts: list[str], *, opening: bool) -> str:

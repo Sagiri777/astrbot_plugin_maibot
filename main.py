@@ -11,6 +11,7 @@ from typing import Any
 
 from astrbot.api import AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.message_components import Plain
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star
 from astrbot.core.agent.message import TextPart
@@ -1037,6 +1038,7 @@ class MaiHumanizerPlugin(Star):
                 return
 
         focus_allowed = True
+        requires_focus = False
         if bool(self.config.get("focus_mode_enabled", False)):
             focus_scopes = self.config.get("focus_chat_whitelist", [])
             focus_applies = True
@@ -1047,6 +1049,7 @@ class MaiHumanizerPlugin(Star):
                     or str(event.get_group_id()) in normalized_focus_scopes
                 )
             if focus_applies:
+                requires_focus = True
                 focus_allowed = await self._claim_focus(
                     scope,
                     force=bool(event.is_at_or_wake_command),
@@ -1078,7 +1081,7 @@ class MaiHumanizerPlugin(Star):
             self._planning_scopes.add(scope)
         try:
             async for result in self._plan_autonomous_reply(
-                event, scope, current_record
+                event, scope, current_record, requires_focus=requires_focus
             ):
                 yield result
         finally:
@@ -1086,7 +1089,12 @@ class MaiHumanizerPlugin(Star):
                 self._planning_scopes.discard(scope)
 
     async def _plan_autonomous_reply(
-        self, event: AstrMessageEvent, scope: str, current_record: dict[str, str]
+        self,
+        event: AstrMessageEvent,
+        scope: str,
+        current_record: dict[str, str],
+        *,
+        requires_focus: bool = False,
     ):
         """Keep one planner in flight per chat until its reply has been processed."""
         try:
@@ -1304,6 +1312,7 @@ class MaiHumanizerPlugin(Star):
             if (
                 latest_human is None
                 or latest_human["source_id"] != current_record["source_id"]
+                or (requires_focus and self._focused_scope != scope)
             ):
                 self.logger.debug("Discarded stale Mai planner decision for %s", scope)
                 return
@@ -1347,22 +1356,6 @@ class MaiHumanizerPlugin(Star):
         ):
             return
 
-        event.set_extra("_mai_planner_reply_guide", decision["reply_guide"])
-        event.set_extra("_mai_planner_tone", decision["tone"])
-        event.set_extra("_mai_planner_reason", decision["reason"])
-        event.set_extra("_mai_autonomous_reply", True)
-        event.set_extra(
-            "_mai_planner_context",
-            [
-                {
-                    "source_id": item["source_id"],
-                    "speaker_name": item["speaker_name"],
-                    "role": item.get("role", "user"),
-                    "text": item["text"],
-                }
-                for item in recent_messages
-            ],
-        )
         conversation_id = (
             await self.context.conversation_manager.get_curr_conversation_id(scope)
         )
@@ -1394,9 +1387,26 @@ class MaiHumanizerPlugin(Star):
             if (
                 latest_human is None
                 or latest_human["source_id"] != current_record["source_id"]
+                or (requires_focus and self._focused_scope != scope)
             ):
                 return
             self._last_autonomous_reply[scope] = time.monotonic()
+        event.set_extra("_mai_planner_reply_guide", decision["reply_guide"])
+        event.set_extra("_mai_planner_tone", decision["tone"])
+        event.set_extra("_mai_planner_reason", decision["reason"])
+        event.set_extra("_mai_autonomous_reply", True)
+        event.set_extra(
+            "_mai_planner_context",
+            [
+                {
+                    "source_id": item["source_id"],
+                    "speaker_name": item["speaker_name"],
+                    "role": item.get("role", "user"),
+                    "text": item["text"],
+                }
+                for item in recent_messages
+            ],
+        )
         yield event.request_llm(
             prompt=str(event.get_message_str() or "").strip(),
             conversation=conversation,
@@ -1430,8 +1440,20 @@ class MaiHumanizerPlugin(Star):
                 current_message=str(event.get_message_str() or ""),
             )
             if cleaned_text != completion_text:
-                response.completion_text = cleaned_text
-                completion_text = cleaned_text
+                result_chain = getattr(response, "result_chain", None)
+                if result_chain is None:
+                    response.completion_text = cleaned_text
+                else:
+                    # The completion_text setter merges all Plain components at
+                    # the front of the chain, moving text across images/audio.
+                    for part in result_chain.chain:
+                        if isinstance(part, Plain):
+                            part.text = clean_visible_reply(
+                                part.text,
+                                current_message=str(event.get_message_str() or ""),
+                                allow_empty=True,
+                            )
+                completion_text = str(response.completion_text or "").strip()
         if completion_text:
             event.set_extra("_mai_generated_reply_text", completion_text[:800])
 
@@ -2093,7 +2115,12 @@ class MaiHumanizerPlugin(Star):
             return
 
         async with self._state_lock:
-            if scope in self._learning_scopes or scope in self._feedback_scopes:
+            if (
+                scope in self._learning_scopes
+                or scope in self._feedback_scopes
+                # Profiles are shared by speaker across all chat scopes.
+                or (normalized_target == "user" and self._learning_scopes)
+            ):
                 deleted_count = -1
             elif normalized_target == "scope":
                 expressions = self._store["expressions"].pop(scope, [])
@@ -2127,7 +2154,7 @@ class MaiHumanizerPlugin(Star):
                 )
         if deleted_count < 0:
             yield event.plain_result(
-                "当前聊天正在执行学习任务，请等待完成后再清除，避免数据被立即写回。"
+                "相关聊天正在执行学习任务，请等待完成后再清除，避免数据被立即写回。"
             )
             return
 

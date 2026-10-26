@@ -6,7 +6,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from astrbot.api.provider import ProviderRequest
+from astrbot.api.message_components import Image, Plain
+from astrbot.api.provider import LLMResponse, ProviderRequest
+from astrbot.core.message.message_event_result import MessageChain
 
 from .test_main import MaiHumanizerPlugin, _event, package_name
 from .test_output_quality import _context
@@ -56,6 +58,7 @@ def test_no_context_or_formal_task_does_not_invent_a_casual_style():
         ("*歪头看你* 怎么了？", "怎么了？"),
         ("这个我知道。\n希望对你有帮助。", "这个我知道。"),
         ("（笑）这个确实离谱。", "（笑）这个确实离谱。"),
+        ("（点头）", "（点头）"),
     ],
 )
 def test_visible_reply_cleanup_is_conservative(raw, expected):
@@ -85,6 +88,49 @@ async def test_llm_response_is_cleaned_before_capture_and_send_tracking():
     await plugin.capture_autonomous_reply(event, response)
     assert response.completion_text == "我也这么觉得。"
     assert event.get_extra("_mai_generated_reply_text") == "我也这么觉得。"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_preserves_text_positions_in_multimodal_reply():
+    plugin = MaiHumanizerPlugin(_context(), {})
+    event = _event(private=False)
+    event.get_message_str.return_value = "你怎么看"
+    await plugin.humanize_request(event, ProviderRequest(prompt="你怎么看"))
+    before = Plain("（点头）先看看这张图。")
+    picture = Image.fromURL("https://example.com/example.png")
+    after = Plain("这里就是问题所在。\n希望对你有帮助。")
+    response = LLMResponse(
+        role="assistant", result_chain=MessageChain(chain=[before, picture, after])
+    )
+
+    await plugin.capture_autonomous_reply(event, response)
+
+    assert response.result_chain.chain == [before, picture, after]
+    assert before.text == "先看看这张图。"
+    assert after.text == "这里就是问题所在。"
+    assert event.get_extra("_mai_generated_reply_text") == response.completion_text
+
+
+@pytest.mark.asyncio
+async def test_cleanup_can_empty_one_component_without_erasing_the_reply():
+    plugin = MaiHumanizerPlugin(_context(), {})
+    event = _event(private=False)
+    event.get_message_str.return_value = "你怎么看"
+    await plugin.humanize_request(event, ProviderRequest(prompt="你怎么看"))
+    stage = Plain("（点头）")
+    picture = Image.fromURL("https://example.com/example.png")
+    answer = Plain("这里就是问题所在。")
+    closer = Plain("希望对你有帮助。")
+    response = LLMResponse(
+        role="assistant",
+        result_chain=MessageChain(chain=[stage, picture, answer, closer]),
+    )
+
+    await plugin.capture_autonomous_reply(event, response)
+
+    assert response.result_chain.chain == [stage, picture, answer, closer]
+    assert stage.text == closer.text == ""
+    assert answer.text == "这里就是问题所在。"
 
 
 @pytest.mark.asyncio
